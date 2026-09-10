@@ -1,0 +1,6 @@
+openai
+openai-agents
+mcp
+uvicorn
+websockets
+python-dotenv
