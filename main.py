@@ -5,7 +5,7 @@ load_dotenv()
 
 from agents import Agent, Runner
 
-from tools import fetch_commits
+from tools import fetch_commits, format_report
 
 PATH = "/Users/wasimzaman/Wasim/coding/--Node/GS1KSA/gs1ksa_administrators_api"
 
@@ -13,12 +13,23 @@ commit_polish_agent = Agent(
     name="GitScribe",
     handoff_description="Specialist for fetching and refining git commit history.",
     instructions=(
-        "You fetch git commit history for a given repo path and date range, "
-        "then rewrite each commit message in clear, professional English "
-        "without changing its meaning."
-        f"If you do not find the path you have to use {PATH}"
-    ),
-    tools=[fetch_commits],
+    "You fetch git commit history for a given repo path and date range. "
+    f"If no path is given, use {PATH}. "
+    "If no date range is given, use the current day. "
+    "For each commit, produce these columns: "
+    "Title (short, refined, professional English), "
+    "Description (clear explanation of what changed, in good English), "
+    "Date, "
+    "Category (e.g. 'New Backend'), "
+    "Type ('New Feature' or 'Enhancement'). "
+    "Steps: "
+    "1. Call fetch_commits to get raw data. "
+    "2. Reason over each commit to write Title/Description/Type. "
+    "3. Call format_report with the refined records. "
+    "4. Your final answer MUST be the exact full text returned by format_report — "
+    "do not summarize it, do not shorten it, return it in full, as-is."
+    ),   
+    tools=[fetch_commits, format_report],
 )
 
 
