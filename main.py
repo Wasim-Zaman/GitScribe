@@ -6,6 +6,7 @@ load_dotenv()
 from agents import Agent, Runner
 
 from tools import fetch_commits, format_report
+from guards import input_rail, output_rail
 
 PATH = "/Users/wasimzaman/Wasim/coding/--Node/GS1KSA/gs1ksa_administrators_api"
 
@@ -28,8 +29,11 @@ commit_polish_agent = Agent(
     "3. Call format_report with the refined records. "
     "4. Your final answer MUST be the exact full text returned by format_report — "
     "do not summarize it, do not shorten it, return it in full, as-is."
-    ),   
+    "If the input query is not related to git commits, return with nice sorry"
+    "Without wasting any time, direct return with sorry message"
+    ),
     tools=[fetch_commits, format_report],
+    input_guardrails=[input_rail],
 )
 
 
