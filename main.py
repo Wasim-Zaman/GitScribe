@@ -33,7 +33,6 @@ commit_polish_agent = Agent(
     "Without wasting any time, direct return with sorry message"
     ),
     tools=[fetch_commits, format_report],
-    input_guardrails=[input_rail],
 )
 
 
