@@ -4,28 +4,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agents import Agent, Runner, function_tool
+from agents import Agent, Runner
 
+from tools.git_commits import fetch_commits
 
-@function_tool
-def history_fun_fact() -> str:
-    """Return a short history fact."""
-    return "Sharks are older than trees."
-
-
-agent = Agent(
-    name="History tutor",
-    instructions="Answer history questions clearly. Use history_fun_fact when it helps.",
-    tools=[history_fun_fact],
+commit_polish_agent = Agent(
+    name="CommitPolish",
+    handoff_description="Specialist for fetching and refining git commit history.",
+    instructions=(
+        "You fetch git commit history for a given repo path and date range, "
+        "then rewrite each commit message in clear, professional English "
+        "without changing its meaning."
+    ),
+    tools=[fetch_commits],
 )
 
 
 async def main() -> None:
     result = await Runner.run(
-        agent,
-        "Tell me something surprising about ancient life on Earth.",
+        commit_polish_agent,
+        "Who was the first president of the United States?",
     )
     print(result.final_output)
+    print(result.last_agent.name)
 
 
 if __name__ == "__main__":
