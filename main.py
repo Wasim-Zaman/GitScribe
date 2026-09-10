@@ -1,3 +1,4 @@
+import os
 import asyncio
 
 from dotenv import load_dotenv
@@ -6,9 +7,8 @@ load_dotenv()
 from agents import Agent, Runner
 
 from tools import fetch_commits, format_report
-from guards import input_rail, output_rail
 
-PATH = "/Users/wasimzaman/Wasim/coding/--Node/GS1KSA/gs1ksa_administrators_api"
+PATH = os.getenv("REPO_PATH")
 
 commit_polish_agent = Agent(
     name="GitScribe",
