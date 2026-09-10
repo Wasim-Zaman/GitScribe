@@ -1,15 +1,14 @@
 import asyncio
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 from agents import Agent, Runner
 
-from tools.git_commits import fetch_commits
+from tools import fetch_commits
 
 commit_polish_agent = Agent(
-    name="CommitPolish",
+    name="GitScribe",
     handoff_description="Specialist for fetching and refining git commit history.",
     instructions=(
         "You fetch git commit history for a given repo path and date range, "
@@ -23,7 +22,7 @@ commit_polish_agent = Agent(
 async def main() -> None:
     result = await Runner.run(
         commit_polish_agent,
-        "Who was the first president of the United States?",
+        "Fetch commits from /path/to/repo for today and refine the messages.",
     )
     print(result.final_output)
     print(result.last_agent.name)

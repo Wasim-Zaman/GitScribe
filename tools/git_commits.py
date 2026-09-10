@@ -1,9 +1,20 @@
-from agents import Agent, function_tool
+from agents import function_tool
 from git import Repo
 from datetime import datetime, timedelta
+from pydantic import BaseModel
+from typing import List, Optional
+
+
+class CommitRecord(BaseModel):
+    hash: str
+    author: str
+    date: str
+    branch: str
+    message: str
+
 
 @function_tool
-def fetch_commits(repo_path: str, date_from: str = None, date_to: str = None) -> list[dict]:
+def fetch_commits(repo_path: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[CommitRecord]:
     """
     Fetch commits from all branches for a given date range.
     Dates in 'YYYY-MM-DD' format. If not provided, defaults to current day.
@@ -26,11 +37,11 @@ def fetch_commits(repo_path: str, date_from: str = None, date_to: str = None) ->
             if commit.hexsha in commits_seen:
                 continue
             commits_seen.add(commit.hexsha)
-            results.append({
-                "hash": commit.hexsha,
-                "author": commit.author.name,
-                "date": commit.committed_datetime.isoformat(),
-                "branch": branch.name,
-                "message": commit.message.strip(),
-            })
+            results.append(CommitRecord(
+                hash=commit.hexsha,
+                author=commit.author.name,
+                date=commit.committed_datetime.isoformat(),
+                branch=branch.name,
+                message=commit.message.strip(),
+            ))
     return results
