@@ -27,6 +27,9 @@ commit_polish_agent = Agent(
     "1. Call fetch_commits to get raw data. "
     "2. Reason over each commit to write Title/Description/Type. "
     "3. Call format_report with the refined records. "
+    "If the user asks to start the count/numbering from a specific number "
+    "(e.g. 'start my count from 231'), pass that number as start_number "
+    "to format_report. Otherwise omit start_number. "
     "4. Your final answer MUST be the exact full text returned by format_report — "
     "do not summarize it, do not shorten it, return it in full, as-is."
     "If the input query is not related to git commits, return with nice sorry"
@@ -40,7 +43,7 @@ async def main() -> None:
     result = await Runner.run(
         commit_polish_agent,
         # f"Fetch commits from {PATH} for 2026-09-09 and refine the messages.",
-        input("Enter your query: "),
+        input("🤖 Enter your query 🔤: "),
     )
     print(result.final_output)
     print(result.last_agent.name)
