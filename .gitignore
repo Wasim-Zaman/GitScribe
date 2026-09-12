@@ -20,3 +20,7 @@ build/
 .vscode/
 .idea/
 .DS_Store
+
+
+# TSV files
+*.tsv
