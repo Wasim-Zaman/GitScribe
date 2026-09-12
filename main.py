@@ -13,7 +13,7 @@ from rich.live import Live
 
 from agents import Agent, Runner
 
-from tools import fetch_commits, format_report
+from tools import fetch_commits, output_rail
 
 console = Console()
 
@@ -28,23 +28,23 @@ f"If no path is given, use {PATH}. "
 "If no date range is given, use the current day. "
 "For each commit, produce these columns: "
 "Title (short, refined, professional English), "
+"Date (single date or date range like 'YYYY-MM-DD to YYYY-MM-DD'), "
 "Description (clear explanation of what changed, in good English), "
-"Date, "
 "Category (e.g. 'New Backend'), "
 "Type ('New Feature' or 'Enhancement'). "
 "Steps: "
 "1. Call fetch_commits to get raw data. "
-"2. Reason over each commit to write Title/Description/Type. "
-"3. Call format_report with the refined records. "
+"2. Reason over each commit to write Title/Date/Description/Category/Type. "
+"3. Build a list of refined records and call output_rail. "
 "If the user asks to start the count/numbering from a specific number "
 "(e.g. 'start my count from 231'), pass that number as start_number "
-"to format_report. Otherwise omit start_number. "
-"4. Your final answer MUST be the exact full text returned by format_report — "
+"to output_rail. Otherwise omit start_number. "
+"4. Your final answer MUST be the exact full text returned by output_rail — "
 "do not summarize it, do not shorten it, return it in full, as-is."
 "If the input query is not related to git commits, return with nice sorry"
 "Without wasting any time, direct return with sorry message"
     ),
-    tools=[fetch_commits, format_report],
+    tools=[fetch_commits, output_rail],
 )
 
 
@@ -64,8 +64,10 @@ async def main() -> None:
             query,
         )
 
-    console.print(Panel(Markdown(result.final_output), title="[bold cyan]Report[/bold cyan]", border_style="green"))
-    console.print(f"[dim]Agent:[/dim] [bold magenta]{result.last_agent.name}[/bold magenta]")
+    output = result.final_output
+
+    console.print(Panel(Markdown(output), title="[bold cyan]Report[/bold cyan]", border_style="green"))
+    console.print(f"\n[dim]Agent:[/dim] [bold magenta]{result.last_agent.name}[/bold magenta]")
 
 
 if __name__ == "__main__":
