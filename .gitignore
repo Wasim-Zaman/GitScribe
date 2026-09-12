@@ -3,6 +3,8 @@
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -20,6 +22,7 @@ build/
 .vscode/
 .idea/
 .DS_Store
+.python-version
 
 
 # TSV files
