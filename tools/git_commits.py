@@ -26,6 +26,10 @@ def fetch_commits(repo_path: str, date_from: Optional[str] = None, date_to: Opti
         today = datetime.now().strftime("%Y-%m-%d")
         date_from = date_to = today
 
+    # Ensure date_from <= date_to if both are provided
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+
     since = date_from
     until = (datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d") if date_to else None
 
@@ -44,4 +48,7 @@ def fetch_commits(repo_path: str, date_from: Optional[str] = None, date_to: Opti
                 branch=branch.name,
                 message=commit.message.strip(),
             ))
+
+    # Sort chronologically from oldest to newest (ascending: start date to end date)
+    results.sort(key=lambda c: datetime.fromisoformat(c.date))
     return results

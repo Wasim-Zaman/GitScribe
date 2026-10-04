@@ -1,4 +1,5 @@
 from agents import function_tool
+from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -97,6 +98,15 @@ def output_rail(
     Returns:
         A short confirmation message. The actual data is written to the TSV file.
     """
+    def _parse_sort_date(c: RefinedCommit):
+        date_str = c.date.split(" to ")[0].strip()
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception:
+            return datetime.min
+
+    commits = sorted(commits, key=_parse_sort_date)
+
     rows = []
     for i, commit in enumerate(commits, start=start_number):
         text_for_type = f"{commit.title} {commit.description}"
