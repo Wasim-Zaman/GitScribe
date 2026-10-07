@@ -45,16 +45,19 @@ REPO_PATH=/path/to/your/git/repo
 ## Usage
 
 ```bash
-python main.py
+python main.py                                   # interactive session (remembers context)
+python main.py "commits from 2026-10-05 till today, start counter from 418"
+python main.py --repo ~/code/api "my commits this week"
 ```
 
-Then type a request, for example:
+Flags: `--repo`, `--model` (or `GITSCRIBE_MODEL`), `--output-dir`, `--offline` (skip `git fetch`), `--no-clipboard`.
 
-```text
-Summarize today's commits for the repo
-```
+GitScribe will:
 
-GitScribe will fetch the commits, refine them, and write `gitscribe_output.tsv` in the working directory.
+1. Run `git fetch --all` and scan **every local and remote branch** (merge commits skipped, cherry-picks de-duplicated).
+2. Refine commits into professional records, grouping near-duplicate follow-ups.
+3. Validate the result: no invented commits, none dropped, and dates taken from the real commit timestamps.
+4. Write `output/gitscribe_<from>_to_<to>.tsv` and copy the rows to your clipboard, ready to paste into Google Sheets.
 
 ## Output
 

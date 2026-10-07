@@ -1,94 +1,196 @@
-import os
+"""GitScribe — turn raw git history into polished, Google-Sheets-ready reports.
+
+Usage:
+    python main.py                                  # interactive session
+    python main.py "commits from 2026-10-05 till today, start from 418"
+    python main.py --repo ~/code/api --model gpt-5 "this week's commits"
+"""
+
+import argparse
 import asyncio
+import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
-from rich.markdown import Markdown
-from rich.spinner import Spinner
-from rich.live import Live
+from rich.table import Table
 
-from agents import Agent, Runner
+from agents import Agent, MaxTurnsExceeded, RunContextWrapper, Runner
 
-from tools import fetch_commits, output_rail
+from tools import ScribeContext, fetch_commits, output_rail
 
 console = Console()
 
-PATH = os.getenv("REPO_PATH")
+TOOL_LABELS = {
+    "fetch_commits": "🔎 Scanning git history across all branches…",
+    "output_rail": "📝 Validating records & writing TSV…",
+}
 
-SYSTEM_INSTRUCTIONS = f"""You are GitScribe, an expert technical documentation specialist and git commit history analyst.
-Your primary role is to fetch, refine, and structure git commit history into clean, professional, release-note quality records.
 
-### Configuration & Defaults:
-- Default Repository Path: {PATH} (use this repository path whenever the user does not specify one).
-- Default Date Range: If no date range is provided, default to the current day.
+def build_instructions(ctx: RunContextWrapper[ScribeContext], agent: Agent) -> str:
+    sc = ctx.context
+    now = sc.now()
+    return f"""You are GitScribe, an expert technical writer and git history analyst. You turn raw commit
+history into polished, release-note quality records for a Google Sheets work log.
 
-### CRITICAL SORTING RULE (Chronological Order: Start Date to End Date):
-- ALWAYS sort and present commits in STRICT ASCENDING CHRONOLOGICAL ORDER (from the earliest start date to the latest end date, lower date to higher date).
-- For example, if the date range is 2026-09-21 to 2026-09-27 (or date 21 to 30), the records MUST start at 2026-09-21 and progress forward in time to 2026-09-27.
-- NEVER present commits in reverse chronological order (newest to oldest). The chronological flow must always go from older dates to newer dates.
+## Session facts (authoritative — never guess these)
+- Today: {now:%Y-%m-%d} ({now:%A}), local time {now:%H:%M}, timezone {now.tzname()}.
+- Default repository: {sc.default_repo or "NOT CONFIGURED — ask the user for a path"}.
+- Next counter value if the user says "continue": {sc.next_number}.
 
-### Data Schema for Each Commit:
-Produce a RefinedCommit record for each commit (or grouped commits) with:
-1. Title: Short, refined, professional English summary of the change in imperative mood (e.g., "Add user authentication flow", "Fix pagination bug in table component").
-2. Date: Single date formatted as 'YYYY-MM-DD' (or date range like 'YYYY-MM-DD to YYYY-MM-DD' if multiple commits are grouped).
-3. Description: Clear, comprehensive, professional explanation of what was changed and why, written in high-quality English.
-4. Category: Domain category label (e.g., 'New Backend', 'Frontend', 'Database', 'API', 'DevOps', 'Security', etc. Default to 'New Backend' if generic backend).
-5. Type: Strictly either 'New Feature' (for new capabilities or endpoints) or 'Enhancement' (for improvements, bug fixes, refactorings, optimizations, chores).
+## Understanding the request
+- Resolve every relative date against Today: "today", "yesterday", "this week" (Monday→today),
+  "last week" (previous Mon→Sun), "this month", "last 3 days", "since Monday", etc.
+- "from X till today" → date_from=X, date_to=Today. A single date → both ends equal.
+- No date mentioned → Today only.
+- Counter: "start counter/number/range from 418" → start_number=418. Default 1.
+- "my commits" → author="me". Otherwise author=null (all authors).
+- sync_remote=true and include_merges=false unless the user says otherwise.
 
-### Execution Workflow:
-1. Parse User Request:
-   - Identify target repository path (use {PATH} if unspecified).
-   - Extract the date range (date_from, date_to in 'YYYY-MM-DD' format). If start and end dates are inverted by the user, ensure date_from is the earlier date and date_to is the later date.
-   - Extract starting index/number if requested (e.g., "start the range from 370" -> start_number=370; "start count from 50" -> start_number=50). Default to 1 if omitted.
-2. Call `fetch_commits`:
-   - Fetch the raw commits for the requested repository and date range.
-3. Process & Sort:
-   - Ensure the refined commits list is ordered chronologically from oldest to newest (ascending: lower date to higher date).
-   - Reason over each commit to produce polished Title, Date, Description, Category, and Type.
-4. Call `output_rail`:
-   - Pass the chronologically ordered list of RefinedCommit records to `output_rail`.
-   - Pass `start_number` if specified by the user.
-5. Final Answer:
-   - Your final answer MUST be the exact, unmodified full string returned by `output_rail`.
-   - Do NOT summarize it, truncate it, or add conversational preamble or follow-up text.
+## Workflow
+1. Call `fetch_commits` exactly once per repository/date range requested.
+2. If it returns an error, explain it plainly and suggest a fix. Do not call output_rail.
+3. If total is 0: do NOT call output_rail. Tell the user no commits exist in that range,
+   mention `latest_commit_in_repo` and any warnings (e.g. a failed git fetch), and suggest
+   a range that does contain work.
+4. Otherwise write one RefinedCommit per meaningful change:
+   - Usually one record per commit. Merge near-duplicate commits about the SAME change
+     (e.g. "fix typo", "wip", "address review", a follow-up fix of a commit from the same day)
+     into one record by listing all their hashes in source_hashes.
+   - title: imperative, specific, ≤ 80 chars, no conventional-commit prefix
+     (e.g. "Add failed-rows download for bulk product imports").
+   - description: 1–3 crisp sentences of professional English explaining WHAT changed and
+     WHY/impact. Use the subject, body, branch name and changed file paths for context.
+     Never invent details that aren't supported by the data.
+   - category: domain label such as 'New Backend', 'Frontend', 'Database', 'API', 'DevOps',
+     'Security', 'Documentation', 'Testing'. Default 'New Backend' for generic backend work.
+   - type: 'New Feature' for genuinely new capabilities/endpoints/modules; 'Enhancement' for
+     fixes, refactors, optimisations, docs, chores and improvements to existing things.
+   - source_hashes: the hashes exactly as returned by fetch_commits.
+5. Call `output_rail` with ALL records and start_number. Every fetched commit must be cited
+   exactly once. If it reports VALIDATION FAILED, fix the issues and call it again.
+6. Final answer: a short markdown summary (2–5 lines): rows written, the No # range,
+   the file path, clipboard status, and any merged/notable items or warnings.
+   Do not repeat the full table — the CLI renders it.
 
-### Handling Unrelated Queries:
-- If the user's input query is not related to git commits, repositories, or change logs, return a polite, concise message stating that GitScribe specializes in git commit history refinement.
+## Off-topic requests
+If the request is unrelated to git history / changelogs / work logs, politely say GitScribe
+specialises in turning git commit history into reports.
 """
 
-commit_polish_agent = Agent(
-    name="GitScribe",
-    handoff_description="Specialist for fetching and refining git commit history.",
-    instructions=SYSTEM_INSTRUCTIONS,
-    tools=[fetch_commits, output_rail],
-)
 
-
-async def main() -> None:
-    console.print(
-        Panel.fit(
-            "[bold cyan]GitScribe[/bold cyan] — Git Commit History Refiner",
-            border_style="cyan",
-        )
+def build_agent(model: str | None) -> Agent[ScribeContext]:
+    kwargs = {"model": model} if model else {}
+    return Agent[ScribeContext](
+        name="GitScribe",
+        handoff_description="Specialist for fetching and refining git commit history.",
+        instructions=build_instructions,
+        tools=[fetch_commits, output_rail],
+        **kwargs,
     )
 
-    query = Prompt.ask("[bold green]Enter your request[/bold green]")
 
-    with console.status("[bold cyan]GitScribe is working...[/bold cyan]", spinner="dots"):
-        result = await Runner.run(
-            commit_polish_agent,
-            query,
-        )
+def render_report(sc: ScribeContext) -> None:
+    report = sc.last_report
+    if not report:
+        return
+    table = Table(title="GitScribe Report", header_style="bold cyan", show_lines=True, expand=True)
+    table.add_column("No #", justify="right", style="bold", no_wrap=True)
+    table.add_column("Title", style="white", ratio=3)
+    table.add_column("Date", style="green", no_wrap=True)
+    table.add_column("Description", style="dim", ratio=5)
+    table.add_column("Category", style="magenta", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    for r in report.rows:
+        type_style = "bold yellow" if r.type == "New Feature" else "cyan"
+        table.add_row(str(r.number), r.title, r.date, r.description, r.category, f"[{type_style}]{r.type}[/]")
+    console.print(table)
+    clip = "[green]✔ copied to clipboard[/green]" if report.copied_to_clipboard else "[dim]clipboard unavailable[/dim]"
+    console.print(f"[bold]File:[/bold] [link=file://{report.path}]{report.path}[/link]  {clip}")
 
-    output = result.final_output
 
-    console.print(Panel(Markdown(output), title="[bold cyan]Report[/bold cyan]", border_style="green"))
-    console.print(f"\n[dim]Agent:[/dim] [bold magenta]{result.last_agent.name}[/bold magenta]")
+async def run_once(agent: Agent, sc: ScribeContext, history: list, query: str) -> list:
+    sc.last_report = None
+    result = Runner.run_streamed(agent, history + [{"role": "user", "content": query}], context=sc, max_turns=25)
+
+    with console.status("[bold cyan]GitScribe is thinking…[/bold cyan]", spinner="dots") as status:
+        async for event in result.stream_events():
+            if event.type != "run_item_stream_event":
+                continue
+            if event.name == "tool_called":
+                name = getattr(event.item.raw_item, "name", "tool")
+                status.update(f"[bold cyan]{TOOL_LABELS.get(name, f'Running {name}…')}[/bold cyan]")
+            elif event.name == "tool_output":
+                output = str(event.item.output)
+                if output.startswith("VALIDATION FAILED"):
+                    console.print("[yellow]↻ Output rail caught issues — agent is self-correcting…[/yellow]")
+                status.update("[bold cyan]GitScribe is thinking…[/bold cyan]")
+
+    render_report(sc)
+    if result.final_output:
+        console.print(Panel(Markdown(str(result.final_output)), title="[bold cyan]GitScribe[/bold cyan]", border_style="green"))
+    return result.to_input_list()
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="GitScribe — AI git commit history refiner")
+    p.add_argument("request", nargs="*", help="One-shot request; omit for interactive mode.")
+    p.add_argument("--repo", default=os.getenv("REPO_PATH"), help="Repository path (default: $REPO_PATH).")
+    p.add_argument("--model", default=os.getenv("GITSCRIBE_MODEL"), help="Model name (default: $GITSCRIBE_MODEL or SDK default).")
+    p.add_argument("--output-dir", default=os.getenv("GITSCRIBE_OUTPUT_DIR", "output"), help="Where TSV files are written.")
+    p.add_argument("--offline", action="store_true", help="Never run `git fetch`.")
+    p.add_argument("--no-clipboard", action="store_true", help="Don't copy rows to the clipboard.")
+    return p.parse_args()
+
+
+async def main() -> int:
+    args = parse_args()
+    if not os.getenv("OPENAI_API_KEY"):
+        console.print("[bold red]OPENAI_API_KEY is not set.[/bold red] Add it to .env (see .env.example).")
+        return 1
+
+    sc = ScribeContext(
+        default_repo=(args.repo or "").strip().strip('"') or None,
+        output_dir=Path(args.output_dir),
+        allow_network=not args.offline,
+        use_clipboard=not args.no_clipboard,
+    )
+    agent = build_agent(args.model)
+
+    console.print(Panel.fit(
+        "[bold cyan]GitScribe[/bold cyan] — Git Commit History Refiner\n"
+        f"[dim]repo:[/dim] {sc.default_repo or '[red]not set[/red]'}   "
+        f"[dim]today:[/dim] {sc.now():%Y-%m-%d (%a)}",
+        border_style="cyan",
+    ))
+
+    history: list = []
+    one_shot = " ".join(args.request).strip()
+    while True:
+        query = one_shot or Prompt.ask("\n[bold green]Enter your request[/bold green] [dim](or 'exit')[/dim]").strip()
+        if not query:
+            continue
+        if query.lower() in {"exit", "quit", "q", ":q"}:
+            return 0
+        try:
+            history = await run_once(agent, sc, history, query)
+        except MaxTurnsExceeded:
+            console.print("[red]The agent hit its turn limit. Try a narrower request.[/red]")
+        except Exception as exc:  # surface any SDK/API error without a traceback wall
+            console.print(f"[bold red]Error:[/bold red] {type(exc).__name__}: {exc}")
+        if one_shot:
+            return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        sys.exit(asyncio.run(main()))
+    except (KeyboardInterrupt, EOFError):
+        console.print("\n[dim]Bye![/dim]")
